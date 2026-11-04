@@ -19,6 +19,7 @@ import json
 import math
 import os
 import pathlib
+import re
 import time
 from collections import Counter
 
@@ -44,7 +45,7 @@ def _neural_backend(cfg: dict, log=print):
         translation_model=n.get("translation_model", "facebook/nllb-200-distilled-600M"),
         similarity_model=n.get("similarity_model", "sentence-transformers/LaBSE"),
         paraphrase_min_sim=float(n.get("paraphrase_min_sim", 0.80)),
-        sentence_min_sim=float(n.get("sentence_min_sim", 0.75)),
+        sentence_min_sim=float(n.get("sentence_min_sim", 0.85)),
         translation_min_sim=float(n.get("translation_min_sim", 0.70)),
         log=log,
     )
@@ -162,7 +163,11 @@ def _hf_access(model_id: str) -> tuple[bool, str | None, str]:
         hf_hub_download(model_id, "config.json", revision=info.sha)
         return True, info.sha, "ok"
     except Exception as e:  # noqa: BLE001 - gated / missing / network
-        return False, None, f"{type(e).__name__}: {str(e).splitlines()[0][:200]}"
+        name = type(e).__name__
+        if "Gated" in name or "403" in str(e) or "401" in str(e):
+            return False, None, "gated on Hugging Face and the HF_TOKEN secret has no access (yet)"
+        msg = re.sub(r"\(Request ID:[^)]*\)", "", str(e).splitlines()[0]).strip()
+        return False, None, f"{name}: {msg[:160]}"
 
 
 def plan(
@@ -177,9 +182,7 @@ def plan(
         if check_access and m["backend"].startswith("hf_"):
             ok, sha, reason = _hf_access(m["model_id"])
             if not ok:
-                hint = (
-                    " (gated: accept the license on Hugging Face and add an HF_TOKEN secret)" if m.get("gated") else ""
-                )
+                hint = " -- accept the model license on Hugging Face" if m.get("gated") else ""
                 skipped[name] = reason + hint
                 log(f"[plan] skipping {name}: {reason}{hint}")
                 continue

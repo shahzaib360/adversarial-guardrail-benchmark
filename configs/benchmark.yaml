@@ -39,7 +39,7 @@ neural:
   translation_model: facebook/nllb-200-distilled-600M
   similarity_model: sentence-transformers/LaBSE
   paraphrase_min_sim: 0.80     # whole-text LaBSE cosine required for a paraphrase to count
-  sentence_min_sim: 0.75       # per-sentence candidate filter
+  sentence_min_sim: 0.85       # per-sentence candidates must clear this; the most reworded one is kept
   translation_min_sim: 0.70    # cross-lingual LaBSE cosine required for a translation to count
 
 models:
@@ -47,14 +47,14 @@ models:
   llama-guard-3-1b:
     label: Llama Guard 3 1B
     backend: ollama
-    model_id: "llama-guard3:1b"     # Meta weights from the Ollama library (Q8_0 GGUF)
+    model_id: "llama-guard3:1b"     # Meta weights from the Ollama library (GGUF)
     tracks: [harmful]
     primary_track: harmful
-    shards: 6
+    shards: 8
   llama-guard-3-8b:
     label: Llama Guard 3 8B
     backend: ollama
-    model_id: "llama-guard3:8b"     # Q4_K_M GGUF; slow on CPU, so opt-in
+    model_id: "llama-guard3:8b"     # GGUF; ~5-8x slower than 1B on CPU, so opt-in
     tracks: [harmful]
     primary_track: harmful
     shards: 16

@@ -50,7 +50,7 @@ class NeuralTransforms:
         translation_model: str = "facebook/nllb-200-distilled-600M",
         similarity_model: str = "sentence-transformers/LaBSE",
         paraphrase_min_sim: float = 0.80,
-        sentence_min_sim: float = 0.75,
+        sentence_min_sim: float = 0.85,
         translation_min_sim: float = 0.70,
         batch_size: int = 16,
         num_beams: int = 5,

@@ -117,7 +117,7 @@ def heatmap_figure(per_t: pd.DataFrame, cfg: dict, track: str, path: pathlib.Pat
     labels = [cfg["models"][m]["label"] for m in models]
     panel_w = max(2.4, 0.95 * len(models))
     fig, axes = plt.subplots(
-        1, 2, figsize=(1.6 + 2 * panel_w, 1.9 + 0.27 * len(rows)), facecolor=th["surface"], gridspec_kw={"wspace": 0.12}
+        1, 2, figsize=(1.6 + 2 * panel_w, 1.9 + 0.27 * len(rows)), facecolor=th["surface"], gridspec_kw={"wspace": 0.24}
     )
     for ax, metric, steps, title in (
         (axes[0], "miss", BLUE, "Miss rate\nharmful / attack inputs"),
@@ -144,13 +144,7 @@ def heatmap_figure(per_t: pd.DataFrame, cfg: dict, track: str, path: pathlib.Pat
         ax.tick_params(which="minor", length=0)
         ax.axhline(0.5, color=th["surface"], linewidth=5)
         cb = fig.colorbar(
-            im,
-            ax=ax,
-            orientation="horizontal",
-            fraction=0.02,
-            pad=0.03 + 0.012 * max(map(len, labels)),
-            aspect=25,
-            shrink=0.8,
+            im, ax=ax, orientation="vertical", fraction=0.05, pad=0.03, shrink=0.35, aspect=12, anchor=(0.0, 1.0)
         )
         cb.set_ticks([0, 0.5, 1.0], labels=["0%", "50%", "100%"])
         cb.outline.set_visible(False)
@@ -276,6 +270,8 @@ def write_report(results: dict, cfg: dict, out_dir: pathlib.Path, figures: dict[
         for m, r in runs.items():
             c = r.get("classifier", {})
             src = c.get("model_id") or c.get("model") or c.get("lexicon", "")
+            if c.get("quantization_level"):
+                src = f"{src}` ({c['quantization_level']}, {c.get('parameter_size') or '?'})`"
             rev = c.get("revision") or c.get("ollama_version") or ""
             rows.append(
                 [
