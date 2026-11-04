@@ -85,6 +85,7 @@ models:
     variants: {jailbreak: [JAILBREAK], any: [INJECTION, JAILBREAK]}
     tracks: [injection, harmful]
     primary_track: injection
+    shards: 6
   prompt-guard-2-86m:
     label: Prompt Guard 2 86M
     backend: hf_seqcls
@@ -93,6 +94,7 @@ models:
     variants: {default: [MALICIOUS, LABEL_1]}
     tracks: [injection, harmful]
     primary_track: injection
+    shards: 6
   prompt-guard-2-22m:
     label: Prompt Guard 2 22M
     backend: hf_seqcls
@@ -101,6 +103,7 @@ models:
     variants: {default: [MALICIOUS, LABEL_1]}
     tracks: [injection, harmful]
     primary_track: injection
+    shards: 6
   protectai-deberta-v2:
     label: ProtectAI DeBERTa-v3 v2
     backend: hf_seqcls
@@ -108,6 +111,7 @@ models:
     variants: {default: [INJECTION]}
     tracks: [injection, harmful]
     primary_track: injection
+    shards: 6
   keyword-injection:
     label: Keyword block-list
     backend: keyword
