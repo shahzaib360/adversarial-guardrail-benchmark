@@ -1,0 +1,194 @@
+name: benchmark
+
+# Runs the full benchmark on GitHub-hosted CPU runners:
+#   prepare (datasets + all transforms, incl. paraphrase/translation)  ->  one job per model shard  ->  collect + report
+# Trigger it from the Actions tab (workflow_dispatch), or push to the `run-benchmark` branch
+# (settings are then read from .github/benchmark-run.yaml on that branch).
+#
+# Meta's Prompt Guard models are gated on Hugging Face: accept their licenses and add an
+# `HF_TOKEN` repository secret, otherwise those models are skipped (and reported as skipped).
+
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: "smoke = a few items per source (pipeline check), full = the whole benchmark"
+        type: choice
+        options: [smoke, full]
+        default: smoke
+      models:
+        description: "Comma-separated model names from configs/benchmark.yaml (empty = all non-optional models)"
+        type: string
+        default: ""
+      include_optional:
+        description: "Also run optional heavy models (Llama Guard 3 8B)"
+        type: boolean
+        default: false
+      push_results:
+        description: "Push raw results + report to the bench-results-<profile> branch"
+        type: boolean
+        default: true
+  push:
+    branches: [run-benchmark]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: benchmark-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  PYTHONUNBUFFERED: "1"
+  HF_HUB_DISABLE_PROGRESS_BARS: "1"
+  TOKENIZERS_PARALLELISM: "false"
+  TORCH_INDEX_URL: https://download.pytorch.org/whl/cpu
+
+jobs:
+  prepare:
+    name: prepare inputs and plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      profile: ${{ steps.settings.outputs.profile }}
+      push_results: ${{ steps.settings.outputs.push_results }}
+    env:
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: |
+          pip install "torch==2.9.1" --index-url "$TORCH_INDEX_URL"
+          pip install -e ".[ml]"
+      - name: Resolve settings
+        id: settings
+        run: agb ci-settings | tee -a "$GITHUB_OUTPUT"
+      - name: Restore prepared inputs
+        id: inputs-cache
+        uses: actions/cache@v4
+        with:
+          path: work
+          key: inputs-${{ steps.settings.outputs.profile }}-${{ hashFiles('configs/benchmark.yaml', 'src/agb/data.py', 'src/agb/sources.py', 'src/agb/canon.py', 'src/agb/transforms/**') }}
+      - name: Prepare inputs (datasets + transforms)
+        if: steps.inputs-cache.outputs.cache-hit != 'true'
+        run: agb --profile "${{ steps.settings.outputs.profile }}" prepare --out work/inputs.jsonl
+      - name: Plan model shards
+        id: plan
+        run: |
+          extra=""
+          if [ "${{ steps.settings.outputs.include_optional }}" = "true" ]; then extra="--include-optional"; fi
+          matrix=$(agb --profile "${{ steps.settings.outputs.profile }}" plan --models "${{ steps.settings.outputs.models }}" $extra --out-json work/plan.json)
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          python -m json.tool work/plan.json | grep -v '"revision"' | head -80
+      - uses: actions/upload-artifact@v4
+        with:
+          name: inputs
+          path: work/
+          retention-days: 3
+
+  score:
+    name: score ${{ matrix.model }} (${{ matrix.shard }}/${{ matrix.nshards }})
+    needs: prepare
+    if: ${{ needs.prepare.outputs.matrix != '' && needs.prepare.outputs.matrix != '{"include":[]}' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    env:
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install (Hugging Face backends)
+        if: startsWith(matrix.backend, 'hf_')
+        run: |
+          pip install "torch==2.9.1" --index-url "$TORCH_INDEX_URL"
+          pip install -e ".[ml]"
+      - name: Install (lightweight backends)
+        if: ${{ !startsWith(matrix.backend, 'hf_') }}
+        run: pip install -e .
+      - name: Start Ollama and pull the model
+        if: matrix.backend == 'ollama'
+        run: |
+          curl -fsSL https://ollama.com/install.sh | sh
+          if ! curl -sf http://127.0.0.1:11434/api/version; then
+            nohup ollama serve > "$RUNNER_TEMP/ollama.log" 2>&1 &
+          fi
+          for i in $(seq 1 60); do curl -sf http://127.0.0.1:11434/api/version && break; sleep 2; done
+          ollama pull "${{ matrix.model_id }}"
+          ollama list
+      - uses: actions/download-artifact@v4
+        with:
+          name: inputs
+          path: work
+      - name: Score
+        run: |
+          agb --profile "${{ needs.prepare.outputs.profile }}" score \
+            --inputs work/inputs.jsonl --model "${{ matrix.model }}" \
+            --shard ${{ matrix.shard }} --nshards ${{ matrix.nshards }} \
+            --revision "${{ matrix.revision }}" --max-seconds 18000 \
+            --out "scores/${{ matrix.model }}.shard-${{ matrix.shard }}.jsonl"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: scores-${{ matrix.model }}-${{ matrix.shard }}
+          path: scores/
+          retention-days: 14
+          if-no-files-found: warn
+
+  collect:
+    name: collect and report
+    needs: [prepare, score]
+    if: ${{ always() && needs.prepare.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: inputs
+          path: work
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: scores-*
+          path: scores
+          merge-multiple: true
+      - name: Collect raw results (hashes + scores, no texts) and build the report
+        run: |
+          agb collect --inputs work/inputs.jsonl --scores-dir scores --out out/raw --plan work/plan.json
+          agb --profile "${{ needs.prepare.outputs.profile }}" analyze --raw out/raw --out out
+          cat out/REPORT.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: results-${{ needs.prepare.outputs.profile }}
+          path: out/
+          retention-days: 30
+      - name: Push results to the bench-results-<profile> branch
+        if: needs.prepare.outputs.push_results == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PROFILE: ${{ needs.prepare.outputs.profile }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/br" && cp -r out/. "$RUNNER_TEMP/br/" && cd "$RUNNER_TEMP/br"
+          git init -q -b "bench-results-$PROFILE"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -qm "Benchmark results: profile=$PROFILE, run=$GITHUB_RUN_ID, commit=${GITHUB_SHA::12}"
+          git push -f "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:bench-results-$PROFILE"

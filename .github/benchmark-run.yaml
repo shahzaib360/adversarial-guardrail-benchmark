@@ -1,0 +1,6 @@
+# Settings used when the benchmark workflow is triggered by a push to the `run-benchmark`
+# branch (workflow_dispatch runs use the form inputs instead).
+profile: smoke          # smoke | full
+models: []              # empty = every non-optional model in configs/benchmark.yaml
+include_optional: false # true = also run Llama Guard 3 8B (slow on CPU)
+push_results: true      # push results to the bench-results-<profile> branch

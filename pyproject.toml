@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "adversarial-guardrail-benchmark"
+version = "0.1.0"
+description = "Adversarial robustness benchmark for open guardrail classifiers (Llama Guard, Prompt Guard, ...): paraphrase, encoding and obfuscation attacks, reported as miss rates alongside false-positive rates."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Shahzaib" }]
+keywords = ["llm", "guardrails", "safety", "llama-guard", "prompt-guard", "red-teaming", "benchmark"]
+dependencies = [
+    "numpy>=1.24",
+    "pandas>=2.1",
+    "pyyaml>=6.0",
+    "requests>=2.31",
+    "matplotlib>=3.8",
+]
+
+[project.optional-dependencies]
+# torch is installed separately (CPU wheels: pip install torch --index-url https://download.pytorch.org/whl/cpu)
+ml = [
+    "transformers==4.57.6",
+    "sentence-transformers==5.1.2",
+    "sentencepiece>=0.2",
+    "protobuf>=4.25",
+    "huggingface-hub>=0.34,<1.0",
+]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+[project.scripts]
+agb = "agb.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+ignore = ["E501", "B905", "E203", "B023", "E731"]
