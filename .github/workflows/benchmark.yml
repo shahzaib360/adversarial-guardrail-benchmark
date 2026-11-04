@@ -259,8 +259,10 @@ jobs:
       - name: Collect raw results (hashes + scores, no texts) and build the report
         run: |
           agb collect --inputs work/inputs.jsonl --scores-dir scores --out out/raw --plan work/plan.json
-          agb --profile "${{ needs.prepare.outputs.profile }}" analyze --raw out/raw --out out
-          cat out/REPORT.md >> "$GITHUB_STEP_SUMMARY"
+          # Raw results are always published; a failure in the analysis step must not lose the scores.
+          agb --profile "${{ needs.prepare.outputs.profile }}" analyze --raw out/raw --out out \
+            || echo "::warning::analyze failed; publishing raw results only"
+          if [ -f out/REPORT.md ]; then cat out/REPORT.md >> "$GITHUB_STEP_SUMMARY"; fi
       - uses: actions/upload-artifact@v6
         with:
           name: results-${{ needs.prepare.outputs.profile }}
