@@ -38,6 +38,27 @@ def cmd_prepare(a) -> None:
     prepare(cfg, a.out, neural=not a.no_neural, only_transforms=_csv(a.transforms), log=_log)
 
 
+def cmd_plan_neural(a) -> None:
+    from .pipeline import plan_neural
+
+    cfg = load_config(a.config, a.profile)
+    print(json.dumps(plan_neural(cfg, chars_per_shard=a.chars_per_shard), separators=(",", ":")))
+
+
+def cmd_neural(a) -> None:
+    from .pipeline import prepare_neural
+
+    cfg = load_config(a.config, a.profile)
+    prepare_neural(cfg, a.track, a.transform, a.shard, a.nshards, a.out, log=_log)
+
+
+def cmd_merge(a) -> None:
+    from .pipeline import merge_inputs
+
+    cfg = load_config(a.config, a.profile)
+    merge_inputs(cfg, a.base, a.parts, a.out, log=_log)
+
+
 def cmd_plan(a) -> None:
     from .pipeline import plan
 
@@ -84,6 +105,14 @@ def cmd_analyze(a) -> None:
     analyze(a.raw, a.out, cfg, log=_log)
 
 
+def cmd_readme(a) -> None:
+    from .report import update_readme
+
+    cfg = load_config(a.config, a.profile)
+    update_readme(a.readme, a.results, cfg)
+    _log(f"[readme] updated the results block in {a.readme}")
+
+
 def cmd_ci_settings(a) -> None:
     """Resolve benchmark settings for GitHub Actions (workflow_dispatch inputs or .github/benchmark-run.yaml)."""
     import yaml
@@ -122,6 +151,24 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--transforms", default=None, help="comma-separated subset of transforms")
     p.set_defaults(fn=cmd_prepare)
 
+    p = sub.add_parser("plan-neural", help="emit the GitHub Actions matrix of neural-transform shards")
+    p.add_argument("--chars-per-shard", type=int, default=40_000)
+    p.set_defaults(fn=cmd_plan_neural)
+
+    p = sub.add_parser("neural", help="apply one neural transform to one shard of a track's items")
+    p.add_argument("--track", required=True)
+    p.add_argument("--transform", required=True)
+    p.add_argument("--shard", type=int, default=0)
+    p.add_argument("--nshards", type=int, default=1)
+    p.add_argument("--out", required=True)
+    p.set_defaults(fn=cmd_neural)
+
+    p = sub.add_parser("merge", help="append neural-transform shards to the deterministic inputs")
+    p.add_argument("--base", default="work/inputs.jsonl")
+    p.add_argument("--parts", default="neural")
+    p.add_argument("--out", default="work/inputs.jsonl")
+    p.set_defaults(fn=cmd_merge)
+
     p = sub.add_parser("plan", help="emit the GitHub Actions matrix of model shards")
     p.add_argument("--models", default=None, help="comma-separated model names (default: all non-optional)")
     p.add_argument("--include-optional", action="store_true")
@@ -150,6 +197,11 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--raw", default="results/raw")
     p.add_argument("--out", default="results")
     p.set_defaults(fn=cmd_analyze)
+
+    p = sub.add_parser("readme", help="refresh the results block of README.md from results/")
+    p.add_argument("--readme", default="README.md")
+    p.add_argument("--results", default="results")
+    p.set_defaults(fn=cmd_readme)
 
     p = sub.add_parser("ci-settings", help="(CI) resolve workflow settings as key=value lines")
     p.add_argument("--run-file", default=".github/benchmark-run.yaml")

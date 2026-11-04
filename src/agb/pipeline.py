@@ -2,6 +2,8 @@
 
 * ``prepare``  builds items, applies every transform, adds the canonicalized view and
                writes ``inputs.jsonl`` (contains texts; a CI-internal artifact, not published).
+               In CI the slow neural transforms are split off: ``prepare --no-neural`` +
+               ``plan_neural`` -> ``prepare_neural`` shards in parallel -> ``merge_inputs``.
 * ``plan``     decides which models/shards to run (skipping gated models without access)
                and emits a GitHub Actions matrix.
 * ``collect``  merges score shards into publishable files that contain *no texts*:
@@ -14,6 +16,7 @@ import csv
 import gzip
 import hashlib
 import json
+import math
 import os
 import pathlib
 import time
@@ -29,29 +32,50 @@ def _sha1(text: str) -> str:
 
 
 # ------------------------------------------------------------------------------ prepare
+def _neural_backend(cfg: dict, log=print):
+    try:
+        from .transforms.neural import NeuralTransforms
+    except ImportError as e:
+        log(f"[prepare] neural transforms unavailable ({e}); install the 'ml' extra to enable them")
+        return None
+    n = cfg.get("neural", {})
+    return NeuralTransforms(
+        paraphrase_model=n.get("paraphrase_model", "humarin/chatgpt_paraphraser_on_T5_base"),
+        translation_model=n.get("translation_model", "facebook/nllb-200-distilled-600M"),
+        similarity_model=n.get("similarity_model", "sentence-transformers/LaBSE"),
+        paraphrase_min_sim=float(n.get("paraphrase_min_sim", 0.80)),
+        sentence_min_sim=float(n.get("sentence_min_sim", 0.75)),
+        translation_min_sim=float(n.get("translation_min_sim", 0.70)),
+        log=log,
+    )
+
+
+def _write_samples(samples, out: pathlib.Path) -> None:
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with open(out, "w", encoding="utf-8") as f:
+        for s in samples:
+            f.write(json.dumps(s.to_dict() if hasattr(s, "to_dict") else s, ensure_ascii=False) + "\n")
+
+
+def _summary(cfg: dict, rows: list[dict]) -> dict:
+    out: dict = {"profile": cfg.get("profile"), "seed": cfg["seed"], "tracks": {}, "n_samples": len(rows)}
+    for track in cfg["tracks"]:
+        tr = [r for r in rows if r["track"] == track]
+        clean = [r for r in tr if r["transform"] == "none"]
+        out["tracks"][track] = {
+            "items": dict(Counter(r["source"] for r in clean)),
+            "transforms": dict(Counter(r["transform"] for r in tr)),
+            "invalid": dict(Counter(r["transform"] for r in tr if not r["valid"])),
+        }
+    return out
+
+
 def prepare(cfg: dict, out: str | pathlib.Path, neural: bool = True, only_transforms=None, log=print) -> dict:
+    """Build every sample of every track (optionally without the neural transforms)."""
     t0 = time.time()
-    backend = None
     needs_neural = any(REGISTRY[t].fn is None for tr in cfg["tracks"].values() for t in tr["transforms"])
-    if neural and needs_neural:
-        try:
-            from .transforms.neural import NeuralTransforms
-
-            n = cfg.get("neural", {})
-            backend = NeuralTransforms(
-                paraphrase_model=n.get("paraphrase_model", "humarin/chatgpt_paraphraser_on_T5_base"),
-                translation_model=n.get("translation_model", "facebook/nllb-200-distilled-600M"),
-                similarity_model=n.get("similarity_model", "sentence-transformers/LaBSE"),
-                paraphrase_min_sim=float(n.get("paraphrase_min_sim", 0.80)),
-                sentence_min_sim=float(n.get("sentence_min_sim", 0.75)),
-                translation_min_sim=float(n.get("translation_min_sim", 0.70)),
-                log=log,
-            )
-        except ImportError as e:
-            log(f"[prepare] neural transforms unavailable ({e}); install the 'ml' extra to enable them")
-
+    backend = _neural_backend(cfg, log) if neural and needs_neural else None
     all_samples = []
-    summary: dict = {"profile": cfg.get("profile"), "seed": cfg["seed"], "tracks": {}}
     for track, tcfg in cfg["tracks"].items():
         items = build_items(track, tcfg, seed=int(cfg["seed"]))
         names = [t for t in tcfg["transforms"] if not only_transforms or t in only_transforms]
@@ -60,22 +84,71 @@ def prepare(cfg: dict, out: str | pathlib.Path, neural: bool = True, only_transf
         for s in samples:
             s.canon_text = canonicalize(s.text)
         all_samples.extend(samples)
-        summary["tracks"][track] = {
-            "items": dict(Counter(i.source for i in items)),
-            "transforms": sorted({s.transform for s in samples}),
-            "invalid": dict(Counter(s.transform for s in samples if not s.valid)),
-        }
-
     out = pathlib.Path(out)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    with open(out, "w", encoding="utf-8") as f:
-        for s in all_samples:
-            f.write(json.dumps(s.to_dict(), ensure_ascii=False) + "\n")
-    summary["n_samples"] = len(all_samples)
+    _write_samples(all_samples, out)
+    summary = _summary(cfg, [s.to_dict() for s in all_samples])
     summary["seconds"] = round(time.time() - t0, 1)
-    with open(out.with_suffix(".summary.json"), "w", encoding="utf-8") as f:
-        json.dump(summary, f, indent=2)
+    out.with_suffix(".summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
     log(f"[prepare] wrote {len(all_samples)} samples to {out} in {summary['seconds']}s")
+    return summary
+
+
+def plan_neural(cfg: dict, chars_per_shard: int = 40_000) -> dict:
+    """GitHub matrix for the neural transforms, sharded by the amount of text to process."""
+    include = []
+    for track, tcfg in cfg["tracks"].items():
+        neural = [t for t in tcfg["transforms"] if REGISTRY[t].fn is None]
+        if not neural:
+            continue
+        chars = sum(len(i.text) for i in build_items(track, tcfg, seed=int(cfg["seed"])))
+        for t in neural:
+            n = max(1, math.ceil(chars / chars_per_shard))
+            include += [{"track": track, "transform": t, "shard": k, "nshards": n} for k in range(n)]
+    return {"include": include}
+
+
+def prepare_neural(
+    cfg: dict, track: str, transform: str, shard: int, nshards: int, out: str | pathlib.Path, log=print
+) -> int:
+    """Apply one neural transform to one shard of a track's items."""
+    backend = _neural_backend(cfg, log)
+    if backend is None:
+        raise RuntimeError("neural transforms need the 'ml' extra (torch, transformers, sentence-transformers)")
+    items = build_items(track, cfg["tracks"][track], seed=int(cfg["seed"]))[shard::nshards]
+    t0 = time.time()
+    samples = build_samples(items, [transform], seed=int(cfg["seed"]), neural=backend, log=log)
+    for s in samples:
+        s.canon_text = canonicalize(s.text)
+    _write_samples(samples, pathlib.Path(out))
+    log(
+        f"[neural] {track}/{transform} shard {shard}/{nshards}: {len(samples)} samples "
+        f"({sum(not s.valid for s in samples)} invalid) in {time.time() - t0:.0f}s"
+    )
+    return len(samples)
+
+
+def merge_inputs(
+    cfg: dict, base: str | pathlib.Path, parts_dir: str | pathlib.Path, out: str | pathlib.Path, log=print
+) -> dict:
+    """Append neural-transform shards to the deterministic inputs (de-duplicated by uid)."""
+    rows: dict[str, dict] = {}
+    with open(base, encoding="utf-8") as f:
+        for line in f:
+            r = json.loads(line)
+            rows[r["uid"]] = r
+    n_base = len(rows)
+    parts = sorted(pathlib.Path(parts_dir).rglob("*.jsonl")) if pathlib.Path(parts_dir).exists() else []
+    for p in parts:
+        with open(p, encoding="utf-8") as f:
+            for line in f:
+                r = json.loads(line)
+                rows[r["uid"]] = r
+    out = pathlib.Path(out)
+    _write_samples(list(rows.values()), out)
+    summary = _summary(cfg, list(rows.values()))
+    summary["neural_parts"] = [p.name for p in parts]
+    out.with_suffix(".summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    log(f"[merge] {n_base} deterministic + {len(rows) - n_base} neural samples from {len(parts)} part(s) -> {out}")
     return summary
 
 

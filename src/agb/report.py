@@ -539,3 +539,80 @@ def analyze(raw_dir: str | pathlib.Path, out_dir: str | pathlib.Path, cfg: dict,
     write_report(results, cfg, out_dir, figures)
     log(f"[analyze] wrote metrics, {len(figures)} figure sets and REPORT.md to {out_dir}")
     return results
+
+
+# ------------------------------------------------------------------------------ README block
+README_START, README_END = "<!-- RESULTS:START -->", "<!-- RESULTS:END -->"
+
+
+def _picture(results_rel: str, stem: str, alt: str, width: int = 860) -> str:
+    return (
+        "<picture>\n"
+        f'  <source media="(prefers-color-scheme: dark)" srcset="{results_rel}/figures/{stem}_dark.png">\n'
+        f'  <img alt="{alt}" src="{results_rel}/figures/{stem}_light.png" width="{width}">\n'
+        "</picture>"
+    )
+
+
+def readme_block(results_dir: str | pathlib.Path, cfg: dict, results_rel: str = "results") -> str:
+    """Markdown for the README results section, built from results/metrics/*.csv."""
+    results_dir = pathlib.Path(results_dir)
+    summ = pd.read_csv(results_dir / "metrics" / "summary.csv")
+    manifest = json.loads((results_dir / "raw" / "manifest.json").read_text())
+    for col in ("canon", "primary_variant", "primary_track"):
+        summ[col] = summ[col].astype(str).str.lower() == "true"
+    L = [README_START, ""]
+    prep = manifest.get("prepare", {})
+    L.append(
+        f"_Profile **{prep.get('profile', '?')}**, {manifest.get('n_samples', '?')} transformed samples, generated "
+        f"{manifest.get('created', '?')[:10]} on GitHub-hosted CPU runners. Full tables with 95% intervals: "
+        f"[`{results_rel}/REPORT.md`]({results_rel}/REPORT.md)._\n"
+    )
+    hdr = ["Guard", "Clean miss", "Clean FPR", "Mean miss under attack", "Mean FPR under attack",
+           "Best-of-N evasion", "Any-transform FPR"]  # fmt: skip
+    for track, tcfg in cfg["tracks"].items():
+        models = [m for m, c in cfg["models"].items() if c["primary_track"] == track and m in set(summ["model"])]
+        if not models:
+            continue
+        L.append(f"### {tcfg['title']}\n")
+        if (results_dir / "figures" / f"heatmap_{track}_light.png").exists():
+            L.append(
+                _picture(
+                    results_rel, f"heatmap_{track}", f"Miss rate and false-positive rate per attack, {track} track"
+                )
+            )
+            L.append("")
+        rows = []
+        for m in models:
+            s = summ[(summ["model"] == m) & (summ["track"] == track) & summ["primary_variant"] & ~summ["canon"]]
+            if s.empty:
+                continue
+            s = s.iloc[0]
+            rows.append([cfg["models"][m]["label"], pct(s["clean_miss"]), pct(s["clean_fpr"]), pct(s["mean_attack_miss"]),
+                         pct(s["mean_attack_fpr"]), pct(s["best_of_n_evasion"]), pct(s["any_transform_fpr"])])  # fmt: skip
+        L.append(_md_table(hdr, rows))
+        L.append("")
+    if (results_dir / "figures" / "canonicalization_light.png").exists():
+        L.append("### Input canonicalization: what it recovers, what it costs\n")
+        L.append(
+            _picture(
+                results_rel,
+                "canonicalization",
+                "Best-of-N evasion and any-transform FPR with and without canonicalization",
+            )
+        )
+        L.append("")
+    skipped = manifest.get("skipped") or {}
+    if skipped:
+        L.append(
+            "Not run in this report: " + ", ".join(f"`{m}`" for m in skipped) + " (see REPORT.md for the reason).\n"
+        )
+    L.append(README_END)
+    return "\n".join(L)
+
+
+def update_readme(readme: str | pathlib.Path, results_dir: str | pathlib.Path, cfg: dict) -> None:
+    readme = pathlib.Path(readme)
+    text = readme.read_text(encoding="utf-8")
+    start, end = text.index(README_START), text.index(README_END) + len(README_END)
+    readme.write_text(text[:start] + readme_block(results_dir, cfg) + text[end:], encoding="utf-8")

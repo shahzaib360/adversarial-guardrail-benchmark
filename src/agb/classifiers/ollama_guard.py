@@ -124,6 +124,14 @@ class OllamaGuard(Classifier):
     def continuous(self) -> bool:  # type: ignore[override]
         return bool(self.logprobs_supported)
 
+    def _details(self) -> dict:
+        try:
+            js = self.session.post(f"{self.host}/api/show", json={"model": self.model}, timeout=60).json()
+            d = js.get("details") or {}
+            return {k: d.get(k) for k in ("family", "parameter_size", "quantization_level", "format")}
+        except Exception:  # noqa: BLE001
+            return {}
+
     def info(self) -> dict:
         return {
             "backend": "ollama",
@@ -131,4 +139,5 @@ class OllamaGuard(Classifier):
             "ollama_version": self.server_version,
             "logprobs": self.logprobs_supported,
             "num_ctx": self.num_ctx,
+            **self._details(),
         }

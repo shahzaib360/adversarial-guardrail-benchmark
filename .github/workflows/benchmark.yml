@@ -1,7 +1,13 @@
 name: benchmark
 
-# Runs the full benchmark on GitHub-hosted CPU runners:
-#   prepare (datasets + all transforms, incl. paraphrase/translation)  ->  one job per model shard  ->  collect + report
+# Runs the benchmark on GitHub-hosted CPU runners:
+#
+#   prepare  datasets + deterministic transforms, plan the neural and scoring work
+#   neural   paraphrase / translation shards in parallel            (skipped when inputs are cached)
+#   merge    assemble the final inputs (cached by config + code hash)
+#   score    one job per model shard
+#   collect  merge scores (hashes only, no texts), compute metrics, build the report
+#
 # Trigger it from the Actions tab (workflow_dispatch), or push to the `run-benchmark` branch
 # (settings are then read from .github/benchmark-run.yaml on that branch).
 #
@@ -46,18 +52,74 @@ env:
 
 jobs:
   prepare:
-    name: prepare inputs and plan
+    name: prepare and plan
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 60
     outputs:
-      matrix: ${{ steps.plan.outputs.matrix }}
       profile: ${{ steps.settings.outputs.profile }}
       push_results: ${{ steps.settings.outputs.push_results }}
+      cache_key: ${{ steps.key.outputs.key }}
+      cached: ${{ steps.inputs-cache.outputs.cache-hit == 'true' }}
+      neural_matrix: ${{ steps.plan.outputs.neural_matrix }}
+      score_matrix: ${{ steps.plan.outputs.score_matrix }}
     env:
       HF_TOKEN: ${{ secrets.HF_TOKEN }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install (no torch needed here; huggingface_hub for the access checks)
+        run: pip install -e . "huggingface-hub>=0.34,<1.0"
+      - name: Resolve settings
+        id: settings
+        run: agb ci-settings | tee -a "$GITHUB_OUTPUT"
+      - name: Inputs cache key
+        id: key
+        run: echo "key=inputs-${{ steps.settings.outputs.profile }}-${{ hashFiles('configs/benchmark.yaml', 'src/agb/data.py', 'src/agb/sources.py', 'src/agb/canon.py', 'src/agb/transforms/**') }}" >> "$GITHUB_OUTPUT"
+      - name: Restore prepared inputs
+        id: inputs-cache
+        uses: actions/cache/restore@v5
+        with:
+          path: work
+          key: ${{ steps.key.outputs.key }}
+      - name: Deterministic transforms
+        if: steps.inputs-cache.outputs.cache-hit != 'true'
+        run: agb --profile "${{ steps.settings.outputs.profile }}" prepare --no-neural --out work/inputs.jsonl
+      - name: Plan neural shards and model shards
+        id: plan
+        run: |
+          if [ "${{ steps.inputs-cache.outputs.cache-hit }}" = "true" ]; then
+            neural='{"include":[]}'
+          else
+            neural=$(agb --profile "${{ steps.settings.outputs.profile }}" plan-neural)
+          fi
+          echo "neural_matrix=$neural" >> "$GITHUB_OUTPUT"
+          extra=""
+          if [ "${{ steps.settings.outputs.include_optional }}" = "true" ]; then extra="--include-optional"; fi
+          score=$(agb --profile "${{ steps.settings.outputs.profile }}" plan --models "${{ steps.settings.outputs.models }}" $extra --out-json work/plan.json)
+          echo "score_matrix=$score" >> "$GITHUB_OUTPUT"
+          echo "neural: $neural"
+          python -m json.tool work/plan.json | grep -v '"revision"' | head -80
+      - uses: actions/upload-artifact@v6
+        with:
+          name: inputs-base
+          path: work/
+          retention-days: 3
+
+  neural:
+    name: neural ${{ matrix.track }}/${{ matrix.transform }} (${{ matrix.shard }}/${{ matrix.nshards }})
+    needs: prepare
+    if: ${{ needs.prepare.outputs.neural_matrix != '{"include":[]}' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare.outputs.neural_matrix) }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
@@ -65,27 +127,52 @@ jobs:
         run: |
           pip install "torch==2.9.1" --index-url "$TORCH_INDEX_URL"
           pip install -e ".[ml]"
-      - name: Resolve settings
-        id: settings
-        run: agb ci-settings | tee -a "$GITHUB_OUTPUT"
-      - name: Restore prepared inputs
-        id: inputs-cache
-        uses: actions/cache@v4
+      - name: Transform
+        run: |
+          agb --profile "${{ needs.prepare.outputs.profile }}" neural --track "${{ matrix.track }}" \
+            --transform "${{ matrix.transform }}" --shard ${{ matrix.shard }} --nshards ${{ matrix.nshards }} \
+            --out "neural/${{ matrix.track }}-${{ matrix.transform }}-${{ matrix.shard }}.jsonl"
+      - uses: actions/upload-artifact@v6
+        with:
+          name: neural-${{ matrix.track }}-${{ matrix.transform }}-${{ matrix.shard }}
+          path: neural/
+          retention-days: 3
+
+  merge:
+    name: merge inputs
+    needs: [prepare, neural]
+    if: ${{ always() && needs.prepare.result == 'success' && needs.neural.result != 'cancelled' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e .
+      - uses: actions/download-artifact@v7
+        with:
+          name: inputs-base
+          path: work
+      - uses: actions/download-artifact@v7
+        if: needs.prepare.outputs.cached != 'true'
+        with:
+          pattern: neural-*
+          path: neural
+          merge-multiple: true
+      - name: Merge
+        if: needs.prepare.outputs.cached != 'true'
+        run: |
+          agb --profile "${{ needs.prepare.outputs.profile }}" merge --base work/inputs.jsonl --parts neural --out work/inputs.jsonl
+          python -m json.tool work/inputs.summary.json | head -60
+      - name: Save prepared inputs to the cache
+        if: needs.prepare.outputs.cached != 'true' && needs.neural.result == 'success'
+        uses: actions/cache/save@v5
         with:
           path: work
-          key: inputs-${{ steps.settings.outputs.profile }}-${{ hashFiles('configs/benchmark.yaml', 'src/agb/data.py', 'src/agb/sources.py', 'src/agb/canon.py', 'src/agb/transforms/**') }}
-      - name: Prepare inputs (datasets + transforms)
-        if: steps.inputs-cache.outputs.cache-hit != 'true'
-        run: agb --profile "${{ steps.settings.outputs.profile }}" prepare --out work/inputs.jsonl
-      - name: Plan model shards
-        id: plan
-        run: |
-          extra=""
-          if [ "${{ steps.settings.outputs.include_optional }}" = "true" ]; then extra="--include-optional"; fi
-          matrix=$(agb --profile "${{ steps.settings.outputs.profile }}" plan --models "${{ steps.settings.outputs.models }}" $extra --out-json work/plan.json)
-          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
-          python -m json.tool work/plan.json | grep -v '"revision"' | head -80
-      - uses: actions/upload-artifact@v4
+          key: ${{ needs.prepare.outputs.cache_key }}
+      - uses: actions/upload-artifact@v6
         with:
           name: inputs
           path: work/
@@ -93,18 +180,18 @@ jobs:
 
   score:
     name: score ${{ matrix.model }} (${{ matrix.shard }}/${{ matrix.nshards }})
-    needs: prepare
-    if: ${{ needs.prepare.outputs.matrix != '' && needs.prepare.outputs.matrix != '{"include":[]}' }}
+    needs: [prepare, merge]
+    if: ${{ always() && needs.merge.result == 'success' && needs.prepare.outputs.score_matrix != '{"include":[]}' }}
     runs-on: ubuntu-latest
     timeout-minutes: 350
     strategy:
       fail-fast: false
-      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+      matrix: ${{ fromJSON(needs.prepare.outputs.score_matrix) }}
     env:
       HF_TOKEN: ${{ secrets.HF_TOKEN }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
@@ -126,7 +213,7 @@ jobs:
           for i in $(seq 1 60); do curl -sf http://127.0.0.1:11434/api/version && break; sleep 2; done
           ollama pull "${{ matrix.model_id }}"
           ollama list
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           name: inputs
           path: work
@@ -137,7 +224,7 @@ jobs:
             --shard ${{ matrix.shard }} --nshards ${{ matrix.nshards }} \
             --revision "${{ matrix.revision }}" --max-seconds 18000 \
             --out "scores/${{ matrix.model }}.shard-${{ matrix.shard }}.jsonl"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: scores-${{ matrix.model }}-${{ matrix.shard }}
@@ -147,24 +234,24 @@ jobs:
 
   collect:
     name: collect and report
-    needs: [prepare, score]
-    if: ${{ always() && needs.prepare.result == 'success' }}
+    needs: [prepare, merge, score]
+    if: ${{ always() && needs.merge.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
       - run: pip install -e .
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           name: inputs
           path: work
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           pattern: scores-*
           path: scores
@@ -174,7 +261,7 @@ jobs:
           agb collect --inputs work/inputs.jsonl --scores-dir scores --out out/raw --plan work/plan.json
           agb --profile "${{ needs.prepare.outputs.profile }}" analyze --raw out/raw --out out
           cat out/REPORT.md >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: results-${{ needs.prepare.outputs.profile }}
           path: out/

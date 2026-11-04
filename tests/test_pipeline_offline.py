@@ -59,3 +59,27 @@ def test_offline_pipeline(tmp_path):
     assert canon["mean_attack_miss"] < summ["mean_attack_miss"]  # canonicalization recovers some attacks
     report = (tmp_path / "out" / "REPORT.md").read_text()
     assert "Keyword block-list" in report and "base64" in report
+
+
+def test_merge_inputs(tmp_path):
+    from agb.pipeline import merge_inputs
+
+    cfg = load_config(profile="smoke")
+    base = [
+        {"uid": "a|none", "track": "harmful", "transform": "none", "source": "s", "valid": True},
+        {"uid": "a|base64", "track": "harmful", "transform": "base64", "source": "s", "valid": True},
+    ]
+    part = [
+        {"uid": "a|paraphrase", "track": "harmful", "transform": "paraphrase", "source": "s", "valid": False},
+        {"uid": "a|none", "track": "harmful", "transform": "none", "source": "s", "valid": True},  # duplicate uid
+    ]
+    (tmp_path / "parts").mkdir()
+    (tmp_path / "base.jsonl").write_text("".join(json.dumps(r) + "\n" for r in base))
+    (tmp_path / "parts" / "harmful-paraphrase-0.jsonl").write_text("".join(json.dumps(r) + "\n" for r in part))
+    summary = merge_inputs(
+        cfg, tmp_path / "base.jsonl", tmp_path / "parts", tmp_path / "out.jsonl", log=lambda *_: None
+    )
+    lines = (tmp_path / "out.jsonl").read_text().splitlines()
+    assert len(lines) == 3 and summary["n_samples"] == 3
+    assert summary["tracks"]["harmful"]["invalid"] == {"paraphrase": 1}
+    assert summary["neural_parts"] == ["harmful-paraphrase-0.jsonl"]

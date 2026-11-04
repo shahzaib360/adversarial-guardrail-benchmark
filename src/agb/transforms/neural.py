@@ -15,6 +15,7 @@ Requires the ``ml`` extra (torch, transformers, sentence-transformers, sentencep
 
 from __future__ import annotations
 
+import os
 import re
 
 _SENT_SPLIT = re.compile(r"(?<=[.!?])\s+(?=[\"'(\[A-Z0-9])")
@@ -57,7 +58,7 @@ class NeuralTransforms:
     ):
         import torch
 
-        torch.set_num_threads(max(1, torch.get_num_threads()))
+        torch.set_num_threads(max(1, os.cpu_count() or 1))
         self._torch = torch
         self.paraphrase_model_id = paraphrase_model
         self.translation_model_id = translation_model
