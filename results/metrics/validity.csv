@@ -1,0 +1,6 @@
+track,transform,n,valid,mean_sim
+harmful,paraphrase,399,0.8170,0.8515
+harmful,translate_bn,400,0.9775,0.8519
+harmful,translate_fr,400,0.9975,0.8911
+harmful,translate_zu,400,0.9725,0.8440
+injection,paraphrase,600,0.8750,0.8761

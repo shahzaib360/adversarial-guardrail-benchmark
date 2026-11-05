@@ -1,15 +1,88 @@
 # Adversarial Guardrail Benchmark
 
 How robust are open guardrail classifiers when the attacker does not cooperate?
-This benchmark attacks **Llama Guard 3**, **Prompt Guard (v1 and v2)**, **Qwen3Guard** and
+This benchmark attacks **Llama Guard 3** (1B and 8B), **Prompt Guard**, **Qwen3Guard** and
 **ProtectAI's prompt-injection detector** with 24 paraphrase, translation, encoding, Unicode,
 structural and framing transformations, and reports **miss rates alongside false-positive rates**:
 every transformation is applied to benign inputs too, so a guard that "catches" Base64 attacks by
 flagging *all* Base64 gets no credit for it.
 
+## Key findings
+
+From the full run (300–600 items per track, 21,381 transformed samples, numbers at each model's own
+decision threshold; 95% intervals are within a few points and listed in
+[`results/metrics/per_transform.csv`](results/metrics/per_transform.csv)):
+
+1. **Encodings are the biggest blind spot, and "catching" them usually means flagging everything.**
+   Llama Guard 3 1B misses 92% of hex-encoded, 71–73% of ROT13/Morse and 69% of invisible Unicode-tag
+   harmful requests. It *appears* to catch Base64 (16% miss) only because it also flags 95% of benign
+   Base64 (AUROC 0.47, chance level). Qwen3Guard-Gen 0.6B misses 100% of Base64, hex, ROT13, Morse and
+   reversed requests. Prompt Guard 86M misses 100% of encoded jailbreaks and injections, while ProtectAI's
+   detector "catches" all of them by flagging 100% of encoded *benign* prompts.
+2. **Cheap character tricks still work.** Harmful requests written in mathematical bold letters evade
+   Llama Guard 3 1B every time (100% miss, 0% FPR). The letter-spacing trick publicly reported against
+   Prompt Guard in 2024 still evades Prompt Guard 86M 100% of the time, as do zero-width characters,
+   leetspeak and diacritics (homoglyphs: 98%). Fullwidth and math-bold text do *not* affect Prompt Guard or
+   ProtectAI, because their tokenizers normalise those characters — input normalisation works.
+3. **Paraphrase and framing barely matter; low-resource languages do.** Meaning-checked paraphrases and
+   fiction/research/hypothetical framings move the content guards' miss rates by at most 6 points.
+   Translation is different: Llama Guard 3 1B misses 15% of French, 63% of Bengali and 93% of Zulu
+   requests (Qwen3Guard: 2%, 9%, 64%). Payload splitting (fragments + "concatenate") evades Llama Guard
+   3 1B 72% of the time.
+4. **False positives are half the story.** Prompt Guard 86M flags 23% of benign prompts in clean form
+   (45% of regular community prompts, which are often role-play personas); its INJECTION+JAILBREAK score
+   flags 97%. Qwen3Guard's strict mode flags 14% of clean benign prompts (23% of XSTest's safe-but-scary
+   ones), 88% of leetspeak benign prompts and 42% of benign hypotheticals.
+5. **An attacker who can retry almost always wins.** Every harmful item evades at least one transform for
+   every guard except ProtectAI (69% best-of-N evasion), and ProtectAI flags 100% of benign items under at
+   least one transform.
+6. **Canonicalization is cheap and effective against mechanical tricks.** Decoding and normalising the
+   input before classification cuts the mean miss rate under attack from 38% to 14% (Llama Guard 3 1B),
+   31% to 6% (Qwen3Guard) and 70% to 16% (Prompt Guard 86M), while the mean FPR under attack rises from
+   14% to 17%, 18% to 23% and 9% to 24%. Translation and payload splitting are untouched, so best-of-N
+   evasion stays high (99%, 68%, 34%).
+
+## Results
+
 <!-- RESULTS:START -->
-> Results are produced by the [`benchmark` workflow](.github/workflows/benchmark.yml) on GitHub-hosted
-> CPU runners and committed to [`results/`](results/). See [`results/REPORT.md`](results/REPORT.md).
+
+_Profile **full**, 21381 transformed samples, generated 2026-11-05 on GitHub-hosted CPU runners. Full tables with 95% intervals: [`results/REPORT.md`](results/REPORT.md)._
+
+### Harmful-request detection (content-safety / Llama Guard use case)
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="results/figures/heatmap_harmful_dark.png">
+  <img alt="Miss rate and false-positive rate per attack, harmful track" src="results/figures/heatmap_harmful_light.png" width="860">
+</picture>
+
+| Guard | Items (harmful/benign) | Clean miss | Clean FPR | Mean miss under attack | Mean FPR under attack | Best-of-N evasion | Any-transform FPR |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Llama Guard 3 1B | 150/249 | 7% | 4% | 38% | 14% | 100% | 99% |
+| Qwen3Guard-Gen 0.6B | 150/249 | 1% | 14% | 31% | 18% | 100% | 96% |
+| Keyword block-list | 150/249 | 64% | 11% | 88% | 3% | 100% | 12% |
+
+### Jailbreak / prompt-injection detection (Prompt Guard use case)
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="results/figures/heatmap_injection_dark.png">
+  <img alt="Miss rate and false-positive rate per attack, injection track" src="results/figures/heatmap_injection_light.png" width="860">
+</picture>
+
+| Guard | Items (harmful/benign) | Clean miss | Clean FPR | Mean miss under attack | Mean FPR under attack | Best-of-N evasion | Any-transform FPR |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Prompt Guard 86M (v1) | 300/300 | 16% | 23% | 70% | 9% | 100% | 41% |
+| ProtectAI DeBERTa-v3 v2 | 300/300 | 15% | 5% | 9% | 60% | 69% | 100% |
+| Keyword block-list | 300/300 | 36% | 19% | 84% | 5% | 100% | 21% |
+
+### Input canonicalization: what it recovers, what it costs
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="results/figures/canonicalization_dark.png">
+  <img alt="Best-of-N evasion and any-transform FPR with and without canonicalization" src="results/figures/canonicalization_light.png" width="860">
+</picture>
+
+Not run in this report: `prompt-guard-2-86m`, `prompt-guard-2-22m` (see REPORT.md for the reason).
+
 <!-- RESULTS:END -->
 
 ## What is measured
@@ -65,7 +138,7 @@ paraphrases, ≥ 0.70 cross-lingual for translations); samples below the thresho
 | Llama Guard 3 8B (optional) | `llama-guard3:8b` from the Ollama library | as above; opt-in because it is slow on CPU | as above |
 | Qwen3Guard-Gen 0.6B | `Qwen/Qwen3Guard-Gen-0.6B` | transformers, model's own chat template, single forward pass (policy prefix KV-cached) | P(Unsafe ∪ Controversial) ("strict"); "loose" = P(Unsafe) |
 | Prompt Guard 86M (v1) | `meta-llama/Prompt-Guard-86M` (gated) | transformers; inputs longer than 512 tokens are scored per overlapping window (max) | P(JAILBREAK) (Meta's recommendation for user prompts); also P(INJECTION ∪ JAILBREAK) |
-| Prompt Guard 2 86M / 22M | `meta-llama/Llama-Prompt-Guard-2-86M` / `-22M` (gated) | as above | P(malicious) |
+| Prompt Guard 2 86M / 22M | `meta-llama/Llama-Prompt-Guard-2-86M` / `-22M` (gated) | as above; **not in the published run yet** (Hugging Face access pending) | P(malicious) |
 | ProtectAI DeBERTa-v3 v2 | `protectai/deberta-v3-base-prompt-injection-v2` | as above | P(INJECTION) |
 | Keyword block-list | regexes in `src/agb/classifiers/keyword.py` | naive baseline | 0/1 |
 
@@ -130,7 +203,7 @@ src/agb/classifiers/        guard wrappers (Ollama, HF sequence classifiers, HF 
 src/agb/scoring.py          sharded, resumable, de-duplicated scoring
 src/agb/metrics.py          miss/FPR with Wilson CIs, AUROC, flip rate, best-of-N, calibration
 src/agb/report.py           metric tables, figures, REPORT.md
-results/                    published results: raw scores (text hashes only), metrics, figures, report
+results/                    published results: raw scores (item IDs + text hashes, no texts), metrics, figures, report
 ```
 
 ## Threat model and limitations
@@ -147,11 +220,15 @@ results/                    published results: raw scores (text hashes only), me
 - **Framing transforms are mild.** They keep the request verbatim; real jailbreak prompts are far more
   elaborate (those are covered by the JailbreakHub positives on the injection track).
 - English-centric data; translations are machine translations; paraphrases come from a single paraphraser.
+- **Run note.** One Alpaca instruction (`alpaca:27788`) was sampled into both tracks; a sample-ID
+  collision (fixed after the run, commit `8c3070d`) dropped its 19 harmful-track variants that share a
+  transform with the injection track. The harmful track therefore has 249 instead of 250 benign items for
+  those 19 transforms (9,981 instead of 10,000 samples); nothing else is affected.
 
 ## Responsible use
 
 The benchmark uses public datasets and widely documented transformation techniques, and does not search
-for or optimise new jailbreaks. Published result files contain only text hashes and scores; prompt texts
+for or optimise new jailbreaks. Published result files contain only public dataset item IDs, text hashes and scores; prompt texts
 are regenerated locally from the pinned public sources. The goal is to help people deploying these
 guards understand their failure modes and the cost of mitigations.
 
