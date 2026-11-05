@@ -1,0 +1,139 @@
+{
+  "n_samples": 21381,
+  "runs": {
+    "llama-guard-3-8b": {
+      "n_scored": 4982,
+      "shards_found": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15
+      ],
+      "nshards": 16,
+      "complete": true,
+      "ms_per_text": 6726.3,
+      "continuous": true,
+      "classifier": {
+        "backend": "ollama",
+        "model": "llama-guard3:8b",
+        "ollama_version": "0.40.14",
+        "logprobs": true,
+        "num_ctx": 4096,
+        "family": "llama",
+        "parameter_size": "8.0B",
+        "quantization_level": "Q4_K_M",
+        "format": "gguf"
+      }
+    }
+  },
+  "created": "2026-11-05T02:01:27Z",
+  "github_run": "41940466273",
+  "skipped": {},
+  "revisions": {},
+  "prepare": {
+    "profile": "full",
+    "seed": 1234,
+    "tracks": {
+      "harmful": {
+        "items": {
+          "harmbench_standard": 150,
+          "xstest_safe": 150,
+          "alpaca": 99
+        },
+        "transforms": {
+          "none": 399,
+          "base64": 399,
+          "hex": 399,
+          "rot13": 399,
+          "morse": 399,
+          "reverse": 399,
+          "leetspeak": 399,
+          "homoglyph": 399,
+          "zero_width": 399,
+          "char_spacing": 399,
+          "fullwidth": 399,
+          "math_bold": 399,
+          "diacritics": 399,
+          "unicode_tags": 399,
+          "random_case": 399,
+          "typos": 399,
+          "payload_split": 399,
+          "benign_padding": 399,
+          "fiction_frame": 400,
+          "research_frame": 400,
+          "hypothetical_frame": 400,
+          "paraphrase": 399,
+          "translate_bn": 400,
+          "translate_fr": 400,
+          "translate_zu": 400
+        },
+        "invalid": {
+          "paraphrase": 73,
+          "translate_bn": 9,
+          "translate_fr": 1,
+          "translate_zu": 11
+        }
+      },
+      "injection": {
+        "items": {
+          "alpaca": 150,
+          "jailbreakhub": 150,
+          "tensortrust": 150,
+          "jailbreakhub_regular": 150
+        },
+        "transforms": {
+          "none": 600,
+          "base64": 600,
+          "hex": 600,
+          "rot13": 600,
+          "morse": 600,
+          "reverse": 600,
+          "leetspeak": 600,
+          "homoglyph": 600,
+          "zero_width": 600,
+          "char_spacing": 600,
+          "fullwidth": 600,
+          "math_bold": 600,
+          "diacritics": 600,
+          "unicode_tags": 600,
+          "random_case": 600,
+          "typos": 600,
+          "payload_split": 600,
+          "benign_padding": 600,
+          "paraphrase": 600
+        },
+        "invalid": {
+          "paraphrase": 75
+        }
+      }
+    },
+    "n_samples": 21381,
+    "neural_parts": [
+      "harmful-paraphrase-0.jsonl",
+      "harmful-translate_bn-0.jsonl",
+      "harmful-translate_fr-0.jsonl",
+      "harmful-translate_zu-0.jsonl",
+      "injection-paraphrase-0.jsonl",
+      "injection-paraphrase-1.jsonl",
+      "injection-paraphrase-2.jsonl",
+      "injection-paraphrase-3.jsonl",
+      "injection-paraphrase-4.jsonl",
+      "injection-paraphrase-5.jsonl",
+      "injection-paraphrase-6.jsonl",
+      "injection-paraphrase-7.jsonl",
+      "injection-paraphrase-8.jsonl"
+    ]
+  }
+}
