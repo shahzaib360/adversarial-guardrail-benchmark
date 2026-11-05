@@ -238,9 +238,18 @@ def _summary_rows(summ: pd.DataFrame, models: list[str], cfg: dict, canon: bool)
             continue
         s = s.iloc[0]
         worst = f"{str(s.get('worst_transform', '–')).replace('_', ' ')} ({pct(s.get('worst_miss'))})"
-        rows.append([cfg["models"][m]["label"], pct(s["clean_miss"]), pct(s["clean_fpr"]), pct(s["mean_attack_miss"]),
-                     pct(s["mean_attack_fpr"]), worst, pct(s["best_of_n_evasion"]), pct(s["any_transform_fpr"])])  # fmt: skip
+        rows.append([cfg["models"][m]["label"], _items(s), pct(s["clean_miss"]), pct(s["clean_fpr"]),
+                     pct(s["mean_attack_miss"]), pct(s["mean_attack_fpr"]), worst, pct(s["best_of_n_evasion"]),
+                     pct(s["any_transform_fpr"])])  # fmt: skip
     return rows
+
+
+def _items(s) -> str:
+    """'harmful/benign' item counts behind a summary row (models scored on a subset show fewer)."""
+    try:
+        return f"{int(s['n_pos_items'])}/{int(s['n_neg_items'])}"
+    except (KeyError, TypeError, ValueError):
+        return "–"
 
 
 def write_report(results: dict, cfg: dict, out_dir: pathlib.Path, figures: dict[str, str]) -> str:
@@ -316,6 +325,7 @@ def write_report(results: dict, cfg: dict, out_dir: pathlib.Path, figures: dict[
             L.append(f"![{track} heatmap]({figures[track]})\n")
         hdr = [
             "Model",
+            "Items (harmful/benign)",
             "Clean miss",
             "Clean FPR",
             "Mean miss (attacks)",
@@ -564,8 +574,8 @@ def readme_block(results_dir: str | pathlib.Path, cfg: dict, results_rel: str = 
         f"{manifest.get('created', '?')[:10]} on GitHub-hosted CPU runners. Full tables with 95% intervals: "
         f"[`{results_rel}/REPORT.md`]({results_rel}/REPORT.md)._\n"
     )
-    hdr = ["Guard", "Clean miss", "Clean FPR", "Mean miss under attack", "Mean FPR under attack",
-           "Best-of-N evasion", "Any-transform FPR"]  # fmt: skip
+    hdr = ["Guard", "Items (harmful/benign)", "Clean miss", "Clean FPR", "Mean miss under attack",
+           "Mean FPR under attack", "Best-of-N evasion", "Any-transform FPR"]  # fmt: skip
     for track, tcfg in cfg["tracks"].items():
         models = [m for m, c in cfg["models"].items() if c["primary_track"] == track and m in set(summ["model"])]
         if not models:
@@ -584,8 +594,9 @@ def readme_block(results_dir: str | pathlib.Path, cfg: dict, results_rel: str = 
             if s.empty:
                 continue
             s = s.iloc[0]
-            rows.append([cfg["models"][m]["label"], pct(s["clean_miss"]), pct(s["clean_fpr"]), pct(s["mean_attack_miss"]),
-                         pct(s["mean_attack_fpr"]), pct(s["best_of_n_evasion"]), pct(s["any_transform_fpr"])])  # fmt: skip
+            rows.append([cfg["models"][m]["label"], _items(s), pct(s["clean_miss"]), pct(s["clean_fpr"]),
+                         pct(s["mean_attack_miss"]), pct(s["mean_attack_fpr"]), pct(s["best_of_n_evasion"]),
+                         pct(s["any_transform_fpr"])])  # fmt: skip
         L.append(_md_table(hdr, rows))
         L.append("")
     if (results_dir / "figures" / "canonicalization_light.png").exists():
