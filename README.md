@@ -7,6 +7,9 @@ structural and framing transformations, and reports **miss rates alongside false
 every transformation is applied to benign inputs too, so a guard that "catches" Base64 attacks by
 flagging *all* Base64 gets no credit for it.
 
+**New to the topic?** Read the [student guide (PDF)](docs/student-guide.pdf): a 16-page, beginner-friendly
+walk-through of the ideas, the attacks, the results and the engineering lessons, with exercises.
+
 ## Key findings
 
 From the full run (400–600 items per track, 21,381 transformed samples, numbers at each model's own

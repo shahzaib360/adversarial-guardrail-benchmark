@@ -29,6 +29,7 @@ ml = [
     "huggingface-hub>=0.34,<1.0",
 ]
 dev = ["pytest>=8", "ruff>=0.6"]
+docs = ["reportlab>=4.0"]  # docs/build_student_guide.py
 
 [project.scripts]
 agb = "agb.cli:main"
