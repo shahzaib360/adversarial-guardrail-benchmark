@@ -97,3 +97,16 @@ def test_subsample_items_is_deterministic_and_per_source():
     assert len(keep) == 6 and keep == subsample_items(list(reversed(samples)), 3)
     texts = texts_for_model(samples, {"tracks": ["harmful"], "max_items_per_source": 3})
     assert len(texts) == 6 * 2
+
+
+def test_merge_inputs_keeps_same_item_in_both_tracks(tmp_path):
+    from agb.pipeline import merge_inputs
+
+    cfg = load_config(profile="smoke")
+    rows = [
+        {"uid": "alpaca:7|none", "track": t, "transform": "none", "source": "alpaca", "valid": True}
+        for t in ("harmful", "injection")
+    ]
+    (tmp_path / "base.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+    summary = merge_inputs(cfg, tmp_path / "base.jsonl", tmp_path / "none", tmp_path / "out.jsonl", log=lambda *_: None)
+    assert summary["n_samples"] == 2

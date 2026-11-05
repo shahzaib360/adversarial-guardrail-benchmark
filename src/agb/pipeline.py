@@ -132,18 +132,19 @@ def merge_inputs(
     cfg: dict, base: str | pathlib.Path, parts_dir: str | pathlib.Path, out: str | pathlib.Path, log=print
 ) -> dict:
     """Append neural-transform shards to the deterministic inputs (de-duplicated by uid)."""
-    rows: dict[str, dict] = {}
+    # Keyed by (track, uid): the same source item can be sampled into both tracks.
+    rows: dict[tuple[str, str], dict] = {}
     with open(base, encoding="utf-8") as f:
         for line in f:
             r = json.loads(line)
-            rows[r["uid"]] = r
+            rows[(r["track"], r["uid"])] = r
     n_base = len(rows)
     parts = sorted(pathlib.Path(parts_dir).rglob("*.jsonl")) if pathlib.Path(parts_dir).exists() else []
     for p in parts:
         with open(p, encoding="utf-8") as f:
             for line in f:
                 r = json.loads(line)
-                rows[r["uid"]] = r
+                rows[(r["track"], r["uid"])] = r
     out = pathlib.Path(out)
     _write_samples(list(rows.values()), out)
     summary = _summary(cfg, list(rows.values()))
@@ -329,8 +330,8 @@ def merge_results(into: str | pathlib.Path, other: str | pathlib.Path, log=print
     import pandas as pd
 
     into, other = pathlib.Path(into), pathlib.Path(other)
-    a = pd.read_csv(into / "samples.csv.gz", usecols=["uid", "h"]).set_index("uid")["h"]
-    b = pd.read_csv(other / "samples.csv.gz", usecols=["uid", "h"]).set_index("uid")["h"]
+    a = pd.read_csv(into / "samples.csv.gz", usecols=["track", "uid", "h"]).set_index(["track", "uid"])["h"]
+    b = pd.read_csv(other / "samples.csv.gz", usecols=["track", "uid", "h"]).set_index(["track", "uid"])["h"]
     common = a.index.intersection(b.index)
     same = int((a.loc[common] == b.loc[common]).sum()) if len(common) else 0
     agreement = same / max(len(a), len(b))
