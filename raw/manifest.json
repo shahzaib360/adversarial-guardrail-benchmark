@@ -1,0 +1,263 @@
+{
+  "n_samples": 21381,
+  "runs": {
+    "keyword-harm": {
+      "n_scored": 13312,
+      "shards_found": [
+        0
+      ],
+      "nshards": 1,
+      "complete": true,
+      "ms_per_text": 0.0,
+      "continuous": false,
+      "classifier": {
+        "backend": "keyword",
+        "lexicon": "harm",
+        "n_terms": 62
+      }
+    },
+    "keyword-injection": {
+      "n_scored": 16504,
+      "shards_found": [
+        0
+      ],
+      "nshards": 1,
+      "complete": true,
+      "ms_per_text": 0.1,
+      "continuous": false,
+      "classifier": {
+        "backend": "keyword",
+        "lexicon": "injection",
+        "n_terms": 25
+      }
+    },
+    "llama-guard-3-1b": {
+      "n_scored": 13312,
+      "shards_found": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "nshards": 8,
+      "complete": true,
+      "ms_per_text": 1268.6,
+      "continuous": true,
+      "classifier": {
+        "backend": "ollama",
+        "model": "llama-guard3:1b",
+        "ollama_version": "0.40.14",
+        "logprobs": true,
+        "num_ctx": 4096,
+        "family": "llama",
+        "parameter_size": "1.5B",
+        "quantization_level": "Q8_0",
+        "format": "gguf"
+      }
+    },
+    "prompt-guard-86m": {
+      "n_scored": 29816,
+      "shards_found": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "nshards": 6,
+      "complete": true,
+      "ms_per_text": 484.0,
+      "continuous": true,
+      "classifier": {
+        "backend": "hf_seqcls",
+        "model_id": "meta-llama/Prompt-Guard-86M",
+        "revision": "1209add6ca7d9c1d815171b8e5571587fe3e7b03",
+        "id2label": {
+          "0": "BENIGN",
+          "1": "INJECTION",
+          "2": "JAILBREAK"
+        },
+        "variant_indices": {
+          "jailbreak": [
+            2
+          ],
+          "any": [
+            1,
+            2
+          ]
+        },
+        "window_tokens": 510
+      }
+    },
+    "protectai-deberta-v2": {
+      "n_scored": 29816,
+      "shards_found": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "nshards": 6,
+      "complete": true,
+      "ms_per_text": 411.8,
+      "continuous": true,
+      "classifier": {
+        "backend": "hf_seqcls",
+        "model_id": "protectai/deberta-v3-base-prompt-injection-v2",
+        "revision": "90c9989b1a342275dd0d1a95aad283c04e075671",
+        "id2label": {
+          "0": "SAFE",
+          "1": "INJECTION"
+        },
+        "variant_indices": {
+          "default": [
+            1
+          ]
+        },
+        "window_tokens": 510
+      }
+    },
+    "qwen3guard-gen-0.6b": {
+      "n_scored": 13312,
+      "shards_found": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "nshards": 8,
+      "complete": true,
+      "ms_per_text": 1079.4,
+      "continuous": true,
+      "classifier": {
+        "backend": "hf_guard_llm",
+        "model_id": "Qwen/Qwen3Guard-Gen-0.6B",
+        "revision": "fada3b2f655b89601929198343c94cd2f64d93cc",
+        "labels": {
+          "Safe": 22291,
+          "Unsafe": 73067,
+          "Controversial": 2093
+        },
+        "prefix_cache": true,
+        "prefix_tokens": 199,
+        "template_tail": "ed by commas. If the content is safe, use 'Categories: None'.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nSafety:"
+      }
+    }
+  },
+  "created": "2026-11-05T01:31:00Z",
+  "github_run": "41937855800",
+  "skipped": {
+    "prompt-guard-2-86m": "gated on Hugging Face and the HF_TOKEN secret has no access (yet) -- accept the model license on Hugging Face",
+    "prompt-guard-2-22m": "gated on Hugging Face and the HF_TOKEN secret has no access (yet) -- accept the model license on Hugging Face"
+  },
+  "revisions": {
+    "qwen3guard-gen-0.6b": "fada3b2f655b89601929198343c94cd2f64d93cc",
+    "prompt-guard-86m": "1209add6ca7d9c1d815171b8e5571587fe3e7b03",
+    "protectai-deberta-v2": "90c9989b1a342275dd0d1a95aad283c04e075671"
+  },
+  "prepare": {
+    "profile": "full",
+    "seed": 1234,
+    "tracks": {
+      "harmful": {
+        "items": {
+          "harmbench_standard": 150,
+          "xstest_safe": 150,
+          "alpaca": 99
+        },
+        "transforms": {
+          "none": 399,
+          "base64": 399,
+          "hex": 399,
+          "rot13": 399,
+          "morse": 399,
+          "reverse": 399,
+          "leetspeak": 399,
+          "homoglyph": 399,
+          "zero_width": 399,
+          "char_spacing": 399,
+          "fullwidth": 399,
+          "math_bold": 399,
+          "diacritics": 399,
+          "unicode_tags": 399,
+          "random_case": 399,
+          "typos": 399,
+          "payload_split": 399,
+          "benign_padding": 399,
+          "fiction_frame": 400,
+          "research_frame": 400,
+          "hypothetical_frame": 400,
+          "paraphrase": 399,
+          "translate_bn": 400,
+          "translate_fr": 400,
+          "translate_zu": 400
+        },
+        "invalid": {
+          "paraphrase": 73,
+          "translate_bn": 9,
+          "translate_fr": 1,
+          "translate_zu": 11
+        }
+      },
+      "injection": {
+        "items": {
+          "alpaca": 150,
+          "jailbreakhub": 150,
+          "tensortrust": 150,
+          "jailbreakhub_regular": 150
+        },
+        "transforms": {
+          "none": 600,
+          "base64": 600,
+          "hex": 600,
+          "rot13": 600,
+          "morse": 600,
+          "reverse": 600,
+          "leetspeak": 600,
+          "homoglyph": 600,
+          "zero_width": 600,
+          "char_spacing": 600,
+          "fullwidth": 600,
+          "math_bold": 600,
+          "diacritics": 600,
+          "unicode_tags": 600,
+          "random_case": 600,
+          "typos": 600,
+          "payload_split": 600,
+          "benign_padding": 600,
+          "paraphrase": 600
+        },
+        "invalid": {
+          "paraphrase": 75
+        }
+      }
+    },
+    "n_samples": 21381,
+    "neural_parts": [
+      "harmful-paraphrase-0.jsonl",
+      "harmful-translate_bn-0.jsonl",
+      "harmful-translate_fr-0.jsonl",
+      "harmful-translate_zu-0.jsonl",
+      "injection-paraphrase-0.jsonl",
+      "injection-paraphrase-1.jsonl",
+      "injection-paraphrase-2.jsonl",
+      "injection-paraphrase-3.jsonl",
+      "injection-paraphrase-4.jsonl",
+      "injection-paraphrase-5.jsonl",
+      "injection-paraphrase-6.jsonl",
+      "injection-paraphrase-7.jsonl",
+      "injection-paraphrase-8.jsonl"
+    ]
+  }
+}
