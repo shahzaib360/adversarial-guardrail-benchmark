@@ -153,6 +153,44 @@
         "prefix_tokens": 199,
         "template_tail": "ed by commas. If the content is safe, use 'Categories: None'.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nSafety:"
       }
+    },
+    "llama-guard-3-8b": {
+      "n_scored": 4982,
+      "shards_found": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15
+      ],
+      "nshards": 16,
+      "complete": true,
+      "ms_per_text": 6726.3,
+      "continuous": true,
+      "classifier": {
+        "backend": "ollama",
+        "model": "llama-guard3:8b",
+        "ollama_version": "0.40.14",
+        "logprobs": true,
+        "num_ctx": 4096,
+        "family": "llama",
+        "parameter_size": "8.0B",
+        "quantization_level": "Q4_K_M",
+        "format": "gguf"
+      },
+      "github_run": "41940466273",
+      "input_agreement": 1.0
     }
   },
   "created": "2026-11-05T01:31:00Z",

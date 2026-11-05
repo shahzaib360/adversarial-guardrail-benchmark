@@ -9,7 +9,7 @@ flagging *all* Base64 gets no credit for it.
 
 ## Key findings
 
-From the full run (300–600 items per track, 21,381 transformed samples, numbers at each model's own
+From the full run (400–600 items per track, 21,381 transformed samples, numbers at each model's own
 decision threshold; 95% intervals are within a few points and listed in
 [`results/metrics/per_transform.csv`](results/metrics/per_transform.csv)):
 
@@ -41,6 +41,13 @@ decision threshold; 95% intervals are within a few points and listed in
    31% to 6% (Qwen3Guard) and 70% to 16% (Prompt Guard 86M), while the mean FPR under attack rises from
    14% to 17%, 18% to 23% and 9% to 24%. Translation and payload splitting are untouched, so best-of-N
    evasion stays high (99%, 68%, 34%).
+7. **Bigger is not uniformly better.** On the same 50 harmful / 99 benign items, Llama Guard 3 8B (Q4_K_M)
+   cuts clean misses from 12% to 2% and shrugs off most Unicode tricks (math bold 100% → 22% miss, letter
+   spacing 32% → 2%) and low-resource translations (Bengali 68% → 21%, Zulu 96% → 64%). But it misses
+   100% of Base64, hex, ROT13, Morse, reversed and Unicode-tag payloads (with 0% FPR: it calls everything
+   encoded "safe"), and prepending ~300 words of benign text makes it miss 90% of harmful requests
+   (1B: 2%). Its mean miss under attack (39%) is close to the 1B model's (41%); canonicalization brings it
+   to 12% at a 10% → 12% FPR cost.
 
 ## Results
 
@@ -58,6 +65,7 @@ _Profile **full**, 21381 transformed samples, generated 2026-11-05 on GitHub-hos
 | Guard | Items (harmful/benign) | Clean miss | Clean FPR | Mean miss under attack | Mean FPR under attack | Best-of-N evasion | Any-transform FPR |
 | :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | Llama Guard 3 1B | 150/249 | 7% | 4% | 38% | 14% | 100% | 99% |
+| Llama Guard 3 8B | 50/99 | 2% | 5% | 39% | 10% | 100% | 70% |
 | Qwen3Guard-Gen 0.6B | 150/249 | 1% | 14% | 31% | 18% | 100% | 96% |
 | Keyword block-list | 150/249 | 64% | 11% | 88% | 3% | 100% | 12% |
 
@@ -134,8 +142,8 @@ paraphrases, ≥ 0.70 cross-lingual for translations); samples below the thresho
 
 | Guard | Weights | How it is run | Score |
 | :--- | :--- | :--- | :--- |
-| Llama Guard 3 1B | `llama-guard3:1b` from the Ollama library (Meta's weights as GGUF) | Ollama / llama.cpp on CPU, official prompt template | P(`unsafe`) from token log-probs when available, else the 0/1 verdict |
-| Llama Guard 3 8B (optional) | `llama-guard3:8b` from the Ollama library | as above; opt-in because it is slow on CPU | as above |
+| Llama Guard 3 1B | `llama-guard3:1b` from the Ollama library (Meta's weights as GGUF, Q8_0) | Ollama / llama.cpp on CPU, official prompt template | P(`unsafe`) from token log-probs when available, else the 0/1 verdict |
+| Llama Guard 3 8B (optional) | `llama-guard3:8b` from the Ollama library (Q4_K_M) | as above; opt-in because it is slow on CPU (~7 s/text), so it is scored on a fixed random subset of 50 items per source with every transform | as above |
 | Qwen3Guard-Gen 0.6B | `Qwen/Qwen3Guard-Gen-0.6B` | transformers, model's own chat template, single forward pass (policy prefix KV-cached) | P(Unsafe ∪ Controversial) ("strict"); "loose" = P(Unsafe) |
 | Prompt Guard 86M (v1) | `meta-llama/Prompt-Guard-86M` (gated) | transformers; inputs longer than 512 tokens are scored per overlapping window (max) | P(JAILBREAK) (Meta's recommendation for user prompts); also P(INJECTION ∪ JAILBREAK) |
 | Prompt Guard 2 86M / 22M | `meta-llama/Llama-Prompt-Guard-2-86M` / `-22M` (gated) | as above; **not in the published run yet** (Hugging Face access pending) | P(malicious) |

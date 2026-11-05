@@ -60,6 +60,7 @@ def compute(raw_dir: str | pathlib.Path, cfg: dict) -> dict[str, pd.DataFrame]:
     per_t = pd.concat(pt_rows, ignore_index=True) if pt_rows else pd.DataFrame()
     summ = pd.DataFrame(sm_rows)
     per_s = pd.concat(ps_rows, ignore_index=True) if ps_rows else pd.DataFrame()
+    paired = _paired_on_subsets(samples, summ, raw_dir, cfg, thr)
     validity = (
         samples[samples["family"].isin(["paraphrase", "translation"])]
         .assign(sim=lambda d: pd.to_numeric(d["sim"], errors="coerce"))
@@ -68,7 +69,37 @@ def compute(raw_dir: str | pathlib.Path, cfg: dict) -> dict[str, pd.DataFrame]:
         .reset_index()
     )
     return {"per_transform": per_t, "summary": summ, "per_source": per_s, "validity": validity,
-            "manifest": manifest}  # fmt: skip
+            "paired": paired, "manifest": manifest}  # fmt: skip
+
+
+def _paired_on_subsets(
+    samples: pd.DataFrame, summ: pd.DataFrame, raw_dir: pathlib.Path, cfg: dict, thr: float
+) -> pd.DataFrame:
+    """Re-score every primary model of a track on the items of any model that saw only a subset of them."""
+    if summ.empty:
+        return pd.DataFrame()
+    rows = []
+    base = summ[summ["primary_variant"] & summ["primary_track"] & ~summ["canon"]]
+    for track in cfg["tracks"]:
+        b = base[base["track"] == track]
+        if b.empty:
+            continue
+        full_n = b["n_pos_items"].max()
+        attacks = [t for t in cfg["tracks"][track]["transforms"] if t != "none"]
+        tdf = samples[samples["track"] == track]
+        for sub_model in b.loc[b["n_pos_items"] < full_n, "model"]:
+            sub_scores = pd.read_csv(raw_dir / "scores" / f"{sub_model}.csv.gz", dtype={"h": str, "out": str})
+            v = primary_variant(cfg["models"][sub_model])
+            items = set(attach_scores(tdf, sub_scores, v).dropna(subset=["score"])["item_id"])
+            sub_df = tdf[tdf["item_id"].isin(items)]
+            for model in b["model"]:
+                scores = pd.read_csv(raw_dir / "scores" / f"{model}.csv.gz", dtype={"h": str, "out": str})
+                df = attach_scores(sub_df, scores, primary_variant(cfg["models"][model]))
+                for canon in (False, True):
+                    r = summary(df, "score_canon" if canon else "score", thr, attacks)
+                    r.update({"subset_of": sub_model, "track": track, "model": model, "canon": canon})
+                    rows.append(r)
+    return pd.DataFrame(rows)
 
 
 # ------------------------------------------------------------------------------ figures
@@ -336,6 +367,18 @@ def write_report(results: dict, cfg: dict, out_dir: pathlib.Path, figures: dict[
         ]
         L.append("### Summary\n")
         L.append(_md_table(hdr, _summary_rows(summ[summ["track"] == track], models, cfg, canon=False)))
+        paired = results.get("paired")
+        if paired is not None and not paired.empty and track in set(paired["track"]):
+            for sub_model, g in paired[(paired["track"] == track) & ~paired["canon"]].groupby("subset_of", sort=False):
+                g0 = g.iloc[0]
+                L.append(
+                    f"\n**Same items for every guard:** {cfg['models'][sub_model]['label']} was scored on a fixed "
+                    f"subset ({int(g0['n_pos_items'])} harmful / {int(g0['n_neg_items'])} benign items); "
+                    "all guards on exactly those items:\n"
+                )
+                L.append(
+                    _md_table(hdr, _summary_rows(g.assign(primary_variant=True), list(g["model"]), cfg, canon=False))
+                )
 
         # per-transform miss / FPR grid
         d = per_t[(per_t["track"] == track) & per_t["primary_variant"] & ~per_t["canon"]]
@@ -519,7 +562,7 @@ def analyze(raw_dir: str | pathlib.Path, out_dir: str | pathlib.Path, cfg: dict,
     (out_dir / "metrics").mkdir(parents=True, exist_ok=True)
     (out_dir / "figures").mkdir(parents=True, exist_ok=True)
     results = compute(raw_dir, cfg)
-    for name in ("per_transform", "summary", "per_source", "validity"):
+    for name in ("per_transform", "summary", "per_source", "validity", "paired"):
         df = results[name]
         df.to_csv(out_dir / "metrics" / f"{name}.csv", index=False, float_format="%.4f")
     figures: dict[str, str] = {}
