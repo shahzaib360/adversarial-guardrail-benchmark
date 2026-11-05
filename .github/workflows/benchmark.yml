@@ -34,6 +34,10 @@ on:
         description: "Push raw results + report to the bench-results-<profile> branch"
         type: boolean
         default: true
+      max_items_per_source:
+        description: "Score only a fixed random subset of N items per source (empty = all), e.g. for slow models"
+        type: string
+        default: ""
   push:
     branches: [run-benchmark]
 
@@ -57,6 +61,8 @@ jobs:
     timeout-minutes: 60
     outputs:
       profile: ${{ steps.settings.outputs.profile }}
+      models: ${{ steps.settings.outputs.models }}
+      max_items_per_source: ${{ steps.settings.outputs.max_items_per_source }}
       push_results: ${{ steps.settings.outputs.push_results }}
       cache_key: ${{ steps.key.outputs.key }}
       cached: ${{ steps.inputs-cache.outputs.cache-hit == 'true' }}
@@ -223,6 +229,7 @@ jobs:
             --inputs work/inputs.jsonl --model "${{ matrix.model }}" \
             --shard ${{ matrix.shard }} --nshards ${{ matrix.nshards }} \
             --revision "${{ matrix.revision }}" --max-seconds 18000 \
+            --max-items-per-source "${{ needs.prepare.outputs.max_items_per_source }}" \
             --out "scores/${{ matrix.model }}.shard-${{ matrix.shard }}.jsonl"
       - uses: actions/upload-artifact@v6
         if: always()
@@ -268,16 +275,19 @@ jobs:
           name: results-${{ needs.prepare.outputs.profile }}
           path: out/
           retention-days: 30
-      - name: Push results to the bench-results-<profile> branch
+      - name: Push results to the bench-results-<profile>[-<models>] branch
         if: needs.prepare.outputs.push_results == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           PROFILE: ${{ needs.prepare.outputs.profile }}
+          MODELS: ${{ needs.prepare.outputs.models }}
         run: |
+          BRANCH="bench-results-$PROFILE"
+          if [ -n "$MODELS" ]; then BRANCH="$BRANCH-$(echo "$MODELS" | tr ',' '-' | tr -cd 'a-z0-9.-')"; fi
           mkdir -p "$RUNNER_TEMP/br" && cp -r out/. "$RUNNER_TEMP/br/" && cd "$RUNNER_TEMP/br"
-          git init -q -b "bench-results-$PROFILE"
+          git init -q -b "$BRANCH"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           git commit -qm "Benchmark results: profile=$PROFILE, run=$GITHUB_RUN_ID, commit=${GITHUB_SHA::12}"
-          git push -f "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:bench-results-$PROFILE"
+          git push -f "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:$BRANCH"

@@ -316,3 +316,43 @@ def collect(
     with open(out_dir / "manifest.json", "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2, default=str)
     return manifest
+
+
+# ------------------------------------------------------------------------------ merge results of separate runs
+def merge_results(into: str | pathlib.Path, other: str | pathlib.Path, log=print) -> dict:
+    """Add the models scored in another run (e.g. an opt-in model run separately) to a results/raw directory.
+
+    Both runs must have scored identical inputs: every sample uid must map to the same text hash.
+    """
+    import shutil
+
+    import pandas as pd
+
+    into, other = pathlib.Path(into), pathlib.Path(other)
+    a = pd.read_csv(into / "samples.csv.gz", usecols=["uid", "h"]).set_index("uid")["h"]
+    b = pd.read_csv(other / "samples.csv.gz", usecols=["uid", "h"]).set_index("uid")["h"]
+    common = a.index.intersection(b.index)
+    same = int((a.loc[common] == b.loc[common]).sum()) if len(common) else 0
+    agreement = same / max(len(a), len(b))
+    if agreement < 0.95:
+        raise ValueError(f"only {agreement:.1%} of samples have identical texts in both runs; refusing to merge")
+    if agreement < 1.0:
+        log(
+            f"[merge-results] warning: {max(len(a), len(b)) - same} samples differ between runs; "
+            "their scores are missing for the merged models"
+        )
+    m_into = json.loads((into / "manifest.json").read_text())
+    m_other = json.loads((other / "manifest.json").read_text())
+    for model, run in m_other.get("runs", {}).items():
+        shutil.copy(other / "scores" / f"{model}.csv.gz", into / "scores" / f"{model}.csv.gz")
+        m_into.setdefault("runs", {})[model] = {
+            **run,
+            "github_run": m_other.get("github_run"),
+            "input_agreement": round(agreement, 4),
+        }
+        m_into.get("skipped", {}).pop(model, None)
+        if model in (m_other.get("revisions") or {}):
+            m_into.setdefault("revisions", {})[model] = m_other["revisions"][model]
+        log(f"[merge-results] added {model} ({run.get('n_scored')} scored texts)")
+    (into / "manifest.json").write_text(json.dumps(m_into, indent=2, default=str), encoding="utf-8")
+    return m_into

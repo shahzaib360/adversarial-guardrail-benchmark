@@ -83,3 +83,17 @@ def test_merge_inputs(tmp_path):
     assert len(lines) == 3 and summary["n_samples"] == 3
     assert summary["tracks"]["harmful"]["invalid"] == {"paraphrase": 1}
     assert summary["neural_parts"] == ["harmful-paraphrase-0.jsonl"]
+
+
+def test_subsample_items_is_deterministic_and_per_source():
+    from agb.scoring import subsample_items, texts_for_model
+
+    samples = [
+        {"item_id": f"{src}:{i}", "track": "harmful", "source": src, "transform": t, "text": f"{src} {i} {t}",
+         "canon_text": f"{src} {i} {t}"}
+        for src in ("a", "b") for i in range(10) for t in ("none", "base64")
+    ]  # fmt: skip
+    keep = subsample_items(samples, 3)
+    assert len(keep) == 6 and keep == subsample_items(list(reversed(samples)), 3)
+    texts = texts_for_model(samples, {"tracks": ["harmful"], "max_items_per_source": 3})
+    assert len(texts) == 6 * 2

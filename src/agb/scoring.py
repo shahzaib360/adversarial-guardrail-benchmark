@@ -25,11 +25,24 @@ def load_samples(path: str | pathlib.Path) -> list[dict]:
         return [json.loads(line) for line in f if line.strip()]
 
 
+def subsample_items(samples: list[dict], per_source: int) -> set[str]:
+    """Deterministic subset of item ids: the first ``per_source`` items of each (track, source) by id hash."""
+    groups: dict[tuple[str, str], set[str]] = {}
+    for s in samples:
+        groups.setdefault((s["track"], s["source"]), set()).add(s["item_id"])
+    keep: set[str] = set()
+    for ids in groups.values():
+        keep.update(sorted(ids, key=lambda i: hashlib.sha1(i.encode()).hexdigest())[:per_source])
+    return keep
+
+
 def texts_for_model(samples: list[dict], model_cfg: dict) -> dict[str, str]:
     tracks = set(model_cfg.get("tracks", []))
+    limit = model_cfg.get("max_items_per_source")
+    keep = subsample_items(samples, int(limit)) if limit else None
     texts: dict[str, str] = {}
     for s in samples:
-        if s["track"] not in tracks:
+        if s["track"] not in tracks or (keep is not None and s["item_id"] not in keep):
             continue
         texts[sha1(s["text"])] = s["text"]
         if model_cfg.get("canon", True) and s.get("canon_text"):

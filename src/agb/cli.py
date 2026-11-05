@@ -76,7 +76,9 @@ def cmd_score(a) -> None:
     from .scoring import run_scoring
 
     cfg = load_config(a.config, a.profile)
-    mcfg = cfg["models"][a.model]
+    mcfg = dict(cfg["models"][a.model])
+    if a.max_items_per_source:
+        mcfg["max_items_per_source"] = int(a.max_items_per_source)
     out = a.out or f"scores/{a.model}.shard-{a.shard}.jsonl"
     meta = run_scoring(
         a.inputs,
@@ -105,6 +107,12 @@ def cmd_analyze(a) -> None:
     analyze(a.raw, a.out, cfg, log=_log)
 
 
+def cmd_merge_results(a) -> None:
+    from .pipeline import merge_results
+
+    merge_results(a.into, a.other, log=_log)
+
+
 def cmd_readme(a) -> None:
     from .report import update_readme
 
@@ -117,7 +125,13 @@ def cmd_ci_settings(a) -> None:
     """Resolve benchmark settings for GitHub Actions (workflow_dispatch inputs or .github/benchmark-run.yaml)."""
     import yaml
 
-    settings = {"profile": "smoke", "models": "", "include_optional": "false", "push_results": "true"}
+    settings = {
+        "profile": "smoke",
+        "models": "",
+        "include_optional": "false",
+        "push_results": "true",
+        "max_items_per_source": "",
+    }
     event_path = os.environ.get("GITHUB_EVENT_PATH")
     event = json.loads(pathlib.Path(event_path).read_text()) if event_path and os.path.exists(event_path) else {}
     if os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch":
@@ -184,6 +198,7 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--out", default=None)
     p.add_argument("--max-seconds", type=float, default=None)
     p.add_argument("--revision", default=None)
+    p.add_argument("--max-items-per-source", default=None, help="score a fixed random subset of each source")
     p.set_defaults(fn=cmd_score)
 
     p = sub.add_parser("collect", help="merge score shards into publishable raw files (no texts)")
@@ -197,6 +212,11 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--raw", default="results/raw")
     p.add_argument("--out", default="results")
     p.set_defaults(fn=cmd_analyze)
+
+    p = sub.add_parser("merge-results", help="add models scored in a separate run to a results/raw directory")
+    p.add_argument("--into", default="results/raw")
+    p.add_argument("--from", dest="other", required=True)
+    p.set_defaults(fn=cmd_merge_results)
 
     p = sub.add_parser("readme", help="refresh the results block of README.md from results/")
     p.add_argument("--readme", default="README.md")
