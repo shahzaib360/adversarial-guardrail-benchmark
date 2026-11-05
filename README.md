@@ -112,6 +112,12 @@ Hugging Face: accept the licenses for
 token as the repository secret `HF_TOKEN`. Without it those models are skipped and listed as such in the
 report.
 
+Slow or late models can be scored in a separate run and merged in: run the workflow with
+`models=llama-guard-3-8b`, `include_optional=true` and `max_items_per_source=50` (a fixed random subset of
+each source, every transform), then fetch its `bench-results-full-llama-guard-3-8b` branch and run
+`agb merge-results --into results/raw --from <that branch>/raw` followed by `agb analyze`. The merge
+refuses runs that scored different inputs.
+
 ## Repository layout
 
 ```
